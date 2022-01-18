@@ -118,7 +118,9 @@ def make_narrow_lines(z):
     return flux_nl*strength
 
 
-def make_quasar_template(z, mag, Av=0., Ebv=0., lya_forest=True, absorption=None, filename='', fwhm_vel=None, narrow_lines=True):
+def make_quasar_template(z, mag, Av=0., Ebv=0., lya_forest=True, absorption=None,
+                         filename='', fwhm_vel=None, narrow_lines=True):
+
     """
     z : quasar redshift
     mag : the Gaia magnitude in G-band (Vega mag), roughly corresponds to SDSS r-band
@@ -132,6 +134,7 @@ def make_quasar_template(z, mag, Av=0., Ebv=0., lya_forest=True, absorption=None
     fwhm_vel : velocity broadening to be applied
     narrow_lines : include variable narrow lines?
     """
+
     # Add Vega to AB offset (incl. empirical offset to match ESO ETC):
     mag -= 0.03
 
@@ -333,11 +336,21 @@ def apply_noise(temp_wl, temp_flux, sky_model, throughput, transmission,
     return wl_joint, flux_joint, err_joint, qual_joint
 
 
+
 def main():
-
+    from argparse import ArgumentDefaultsHelpFormatter
     import argparse
+    def set_help_width(max_width=30):
+        """Return a wider HelpFormatter, if possible."""
+        try:
+            # https://stackoverflow.com/a/5464440
+            return lambda prog: ArgumentDefaultsHelpFormatter(prog, max_help_position=max_width)
+        except TypeError:
+            warnings.warn("argparse help formatter failed, falling back.")
+            return ArgumentDefaultsHelpFormatter
 
-    parser = argparse.ArgumentParser(description="Simulate a quasar spectrum and apply 4MOST noise")
+    parser = argparse.ArgumentParser(prog='qmost_etc', description="Simulate a spectrum and apply 4MOST noise")
+    templates = parser.add_subparsers(dest='template')
 
     parser.add_argument('-z', '--redshift', type=float, default=2.5,
                         help="Redshift")
@@ -347,16 +360,10 @@ def main():
                         help="Exposure time in seconds")
     parser.add_argument('--ebv', type=float, default=0.,
                         help="Galactic Extinction, E(B-V)")
-    parser.add_argument('--qso-dust', type=float, default=0.,
-                        help="Intrinsic A(V) in the quasar rest-frame (SMC-type)")
     parser.add_argument('--sky', type=str, default='dark', choices=['dark', 'grey'],
                         help="Sky brightness, either dark (FLI=0.2) or grey (FLI=0.5)  [default:dark]")
     parser.add_argument('--airmass', type=str, default='mid', choices=['high', 'mid', 'low'],
                         help="Airmass, either high (1.45), mid (1.2) or low (1.05)  [default:mid]")
-    parser.add_argument('--lya', action='store_true',
-                        help="Include a random Lyman-alpha forest realization (including DLAs)")
-    parser.add_argument('--narrow-lines', action='store_true',
-                        help="Include additional narrow-line template")
     parser.add_argument('-o', '--output', type=str, default='qso_model.fits',
                         help="Filename of simulated noisy spectrum (FITS Table)")
     parser.add_argument('--model-fname', type=str, default='',
@@ -367,17 +374,38 @@ def main():
                         help="maximum wavelength of range in which to calculate median signal-to-noise ratio")
     parser.add_argument('--dl', type=float, default=1,
                         help="wavelength interval for SNR calculation, i.e., result is given as SNR per dl  [default: 1 Å]")
+
+    parser_qso = templates.add_parser('qso', formatter_class=set_help_width(31),
+                                      help="Use the quasar template by Selsing et al. (2016)")
+    parser_qso.add_argument('--lya', action='store_true',
+                            help="Include a random Lyman-alpha forest realization (including DLAs)")
+    parser_qso.add_argument('--qso-dust', type=float, default=0.,
+                            help="Intrinsic A(V) in the quasar rest-frame (SMC-type)")
+    parser_qso.add_argument('--narrow-lines', action='store_true',
+                            help="Include additional narrow-line template")
+
+    parser_gal = templates.add_parser('gal', formatter_class=set_help_width(31),
+                                      help="Use a galaxy template")
+    parser_gal.add_argument('--type', type=str, choices=['ELG', 'LRG'], default='ELG')
     
     args = parser.parse_args()
 
     # Create model template
-    temp = make_quasar_template(args.redshift, args.magnitude,
-                                Av=args.qso_dust,
-                                Ebv=args.ebv,
-                                lya_forest=args.lya,
-                                narrow_lines=args.narrow_lines,
-                                filename=args.model_fname)
-    temp_wl, temp_flux, DLA_list = temp
+    if args.template == 'qso':
+        temp = make_quasar_template(args.redshift, args.magnitude,
+                                    Av=args.qso_dust,
+                                    Ebv=args.ebv,
+                                    lya_forest=args.lya,
+                                    narrow_lines=args.narrow_lines,
+                                    filename=args.model_fname)
+        temp_wl, temp_flux, DLA_list = temp
+        if args.lya:
+            print("Including random Lyman-alpha forest model (incl. DLAs)")
+        if args.narrow_lines:
+            print("Including narrow emission line model")
+
+    else:
+        return
 
     # Create Mock Observation
     airmass = args.airmass
@@ -409,11 +437,6 @@ def main():
     print(" Airmass        :  %.1f" % airmass_conversion[airmass])
     print(" Sky brightness :  %s" % args.sky)
     print(" Seeing         :  0.8 arcsec")
-
-    if args.lya:
-        print("Including random Lyman-alpha forest model (incl. DLAs)")
-    if args.narrow_lines:
-        print("Including narrow emission line model")
 
     print("Saving simulated spectrum: %s" % args.output)
     if args.model_fname:
