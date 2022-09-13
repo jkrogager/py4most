@@ -1,7 +1,9 @@
 import urllib.request
 from astropy.table import Table
+import sys
 
-catalog_fname = '/Users/krogager/Projects/4MOST/opr2.5/exgal_cat_opr25.fits'
+# catalog_fname = '/Users/krogager/Projects/4MOST/opr2.5/exgal_cat_opr25.fits'
+catalog_fname = sys.argv[1]
 cat = Table.read(catalog_fname)
 
 print("downloading templates:")

@@ -71,6 +71,11 @@ from py4most.etc import lya
 
 # -- Verify data and template paths:
 TEMP_PATH = '/Users/krogager/Projects/4MOST/templates/opr25'
+# The first step is to download the spectral templates needed using the script
+# `download_opr25_templates.py` with the catalog filename as input on the command line:
+#     python3 download_opr25_templates.py  *catalog_fname.fits*
+# The OpR 2.5 catalogs of galactic and extragalactic targets are available on my Google Drive
+# under folder 4MOST/IWG8.
 
 base_path = os.path.dirname(os.path.abspath(__file__))
 data_path = os.path.join(base_path, 'data/')
