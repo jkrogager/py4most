@@ -254,7 +254,7 @@ def save_mock_spectrum(filename, wl, flux, err, qual, t_exp):
 
 
 def apply_noise(temp_wl, temp_flux, sky_model, throughput, transmission,
-                t_exp=1200, filename=''):
+                t_exp=1200, filename='', cr=True):
     """
     temp_wl : array of wavelengths in the input template (units: Angstrom)
     temp_flux : array of fluxes in the input template (units: erg/s/cm2/A)
@@ -303,12 +303,13 @@ def apply_noise(temp_wl, temp_flux, sky_model, throughput, transmission,
         sky = sky['FLUX'] * t_exp
 
         # Insert cosmic rays:
-        l_CR = CR_rate_per_sec * t_exp * len(wl)
-        N_CR = np.random.poisson(l_CR)
-        CR_index = np.random.choice(np.arange(len(wl)), N_CR, replace=False)
-        source[CR_index] = 10**np.random.normal(3.9, 0.2, N_CR)
         qual = np.zeros_like(wl)
-        qual[CR_index] = 1
+        if cr:
+            l_CR = CR_rate_per_sec * t_exp * len(wl)
+            N_CR = np.random.poisson(l_CR)
+            CR_index = np.random.choice(np.arange(len(wl)), N_CR, replace=False)
+            source[CR_index] = 10**np.random.normal(3.9, 0.2, N_CR)
+            qual[CR_index] = 1
 
         # snr = source / np.sqrt(source + sky + N_pix*RON[arm]**2)
         noise = np.sqrt(source + sky + N_pix*RON[arm]**2)
@@ -352,6 +353,8 @@ def main():
     parser = argparse.ArgumentParser(prog='qmost_etc', description="Simulate a spectrum and apply 4MOST noise")
     templates = parser.add_subparsers(dest='template')
 
+    parser.add_argument('-i', '--input', type=str, default=None,
+                        help='Filename of input model template (FITS table with WAVE and FLUX columns)')
     parser.add_argument('-z', '--redshift', type=float, default=2.5,
                         help="Redshift")
     parser.add_argument('-G', '--magnitude', type=float, default=21.,
@@ -364,7 +367,7 @@ def main():
                         help="Sky brightness, either dark (FLI=0.2) or grey (FLI=0.5)  [default:dark]")
     parser.add_argument('--airmass', type=str, default='mid', choices=['high', 'mid', 'low'],
                         help="Airmass, either high (1.45), mid (1.2) or low (1.05)  [default:mid]")
-    parser.add_argument('-o', '--output', type=str, default='qso_model.fits',
+    parser.add_argument('-o', '--output', type=str, default='model_spectrum.fits',
                         help="Filename of simulated noisy spectrum (FITS Table)")
     parser.add_argument('--model-fname', type=str, default='',
                         help="Filename of noiseless model spectrum (FITS Table)")
@@ -374,8 +377,10 @@ def main():
                         help="maximum wavelength of range in which to calculate median signal-to-noise ratio")
     parser.add_argument('--dl', type=float, default=1,
                         help="wavelength interval for SNR calculation, i.e., result is given as SNR per dl  [default: 1 Å]")
+    parser.add_argument('--cr', action='store_true',
+                        help="Include cosmic rays")
 
-    parser_qso = templates.add_parser('qso', formatter_class=set_help_width(31),
+    parser_qso = templates.add_parser('--qso', formatter_class=set_help_width(31),
                                       help="Use the quasar template by Selsing et al. (2016)")
     parser_qso.add_argument('--lya', action='store_true',
                             help="Include a random Lyman-alpha forest realization (including DLAs)")
@@ -384,14 +389,25 @@ def main():
     parser_qso.add_argument('--narrow-lines', action='store_true',
                             help="Include additional narrow-line template")
 
-    parser_gal = templates.add_parser('gal', formatter_class=set_help_width(31),
+    parser_gal = templates.add_parser('--gal', formatter_class=set_help_width(31),
                                       help="Use a galaxy template")
     parser_gal.add_argument('--type', type=str, choices=['ELG', 'LRG'], default='ELG')
     
     args = parser.parse_args()
 
     # Create model template
-    if args.template == 'qso':
+    if args.input is not None:
+        temp = fits.getdata(args.input)
+        temp_wl = temp['WAVE']
+        temp_flux = temp['FLUX']
+
+        # Normalize Template:
+        f0 = synthetic_G_band(temp_wl, temp_flux)
+        wl_band = 6424.9269
+        f_band = 1./(wl_band)**2 * 10**(-(args.magnitude+2.406)/2.5)
+        temp_flux = temp_flux/f0*f_band
+
+    elif args.template == 'qso':
         temp = make_quasar_template(args.redshift, args.magnitude,
                                     Av=args.qso_dust,
                                     Ebv=args.ebv,
@@ -415,7 +431,8 @@ def main():
     throughput = get_efficiency(airmass)
     wl, flux, err, qual = apply_noise(temp_wl, temp_flux, sky_model, throughput, transmission,
                                       t_exp=args.texp,
-                                      filename=args.output
+                                      filename=args.output,
+                                      cr=args.cr,
                                       )
 
     # Calculate median SNR
@@ -430,7 +447,8 @@ def main():
     print("--------------------------------")
     print(" z = %.1f" % args.redshift)
     print(" G = %.1f mag" % args.magnitude)
-    print(" A(V)_QSO = %.1f mag" % args.qso_dust)
+    if hasattr(args, 'qso_dust'):
+        print(" A(V)_QSO = %.1f mag" % args.qso_dust)
 
     print(" E(B-V) = %.2f mag  (Rv=3.1)" % args.ebv)
     print(" Exposure time  :  %.1f sec" % args.texp)
