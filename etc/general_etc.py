@@ -337,7 +337,6 @@ def apply_noise(temp_wl, temp_flux, sky_model, throughput, transmission,
 
     # Package Spectrtum:
     fibnum = np.random.randint(1, 812)
-    # fibnum = 101
     filename = os.path.join(output_dir, cname+'_20221010_1%05i_LJ1.fits' % fibnum)
     save_mock_spectrum(filename, wl_joint, flux_joint, err_joint, qual_joint, t_exp,
                        ra=ra, dec=dec, cname=cname, uid=uid, redshift=redshift,
