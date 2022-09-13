@@ -11,6 +11,21 @@ The spectra are generated based on a set of spectral templates located in the fo
 The code takes as input the input catalog from 4FS (facility simulator) which for each
 target specifies RA, DEC, TEMPLATE, REDSHIFT, MAGNITUDE, MAG_FILTER, TRG_UID, CNAME
 
+MAG and MAG_TYPE can also be used instead of MAGNITUDE and MAG_FILTER. Currently,
+only Gaia G, SDSS-r and SDSS-z bands are allowed.
+
+The CNAME can be generated from the coordinates:
+        # Create Mock Observation
+        RA = np.random.uniform(0, 360)
+        DEC = np.random.uniform(-80, -10)
+        RA_str, DEC_str = decimal2string(RA, DEC, delimiter='')
+        CNAME = 'QMST%s%s' % (RA_str, DEC_str)
+
+For these spectra, a random UID can be used, but should be tied to CNAME, such that
+targets with the same CNAME have the same UID.
+        num = np.random.randint(1e6)
+        TRG_UID = 1000000 + num
+
 `TEMPLATE` here refers to a filename which must be present in the `TEMP_PATH` folder.
 These templates should follow the format for 4FS templates: LAMBDA, FLUX_DENSITY
 Templates are then redshifted and normalized to the given input magnitude.
@@ -35,7 +50,8 @@ and three bins of airmass:
 The transmission curves are tabulated using the 4MOST ETC:
 https://etc.eso.org/observing/etc/fourmost
 
-The output is written to the folder: OUTPUT_DIR
+The output is written to the folder `l1_data` by default. This can be controlled by the parameter
+--output (-o)
 
 """
 
@@ -55,7 +71,6 @@ from py4most.etc import lya
 
 # -- Verify data and template paths:
 TEMP_PATH = '/Users/krogager/Projects/4MOST/templates/opr25'
-OUTPUT_DIR = '/Users/krogager/Projects/4MOST/test_data'
 
 base_path = os.path.dirname(os.path.abspath(__file__))
 data_path = os.path.join(base_path, 'data/')
@@ -84,6 +99,13 @@ filters = {
         'r': r_filter,
         'z': z_filter,
         }
+
+def get_filter_name(x):
+    for band in filters:
+        if band in x:
+            return band
+    else:
+        raise ValueError(f'Unknown Filter: {x}')
 
 # Read noise per pixel:
 RON = {'blue': 2.286,
@@ -340,6 +362,7 @@ def decimal2string(ra, dec, delimiter=':'):
     return (ra_str, dec_str)
 
 
+
 def main():
 
     parser = argparse.ArgumentParser(prog='qmost_etc',
@@ -353,8 +376,12 @@ def main():
                         help="Sky brightness: dark (FLI=0.2) or grey (FLI=0.5)  [default:dark]")
     parser.add_argument('--airmass', type=str, default='mid', choices=['high', 'mid', 'low'],
                         help="Airmass, either high (1.45), mid (1.2) or low (1.05)  [default:mid]")
-    parser.add_argument('--cr', action='store_true',
-                        help="Include cosmic rays")
+    parser.add_argument('--no-cr', action='store_false',
+                        help="Do not include cosmic rays")
+    parser.add_argument('--lya', action='store_true',
+                        help='Include random Lyman-alpha forest')
+    parser.add_argument('-o', '--output', type=str, default='l1_data',
+                        help='Output directory (default: l1_data)')
 
     args = parser.parse_args()
 
@@ -368,13 +395,28 @@ def main():
     sky_model = get_sky_model(airmass, moon_phase)
     throughput = get_efficiency(airmass)
 
+    if 'MAGNITUDE' in cat.colnames:
+        mag_name = 'MAGNITUDE'
+    elif 'MAG' in cat.columns:
+        mag_name = 'MAG'
+    else:
+        raise ValueError('Catalog must have a column named MAG or MAGNITUDE')
+
+    if 'MAG_FILTER' in cat.colnames:
+        mag_type = 'MAG_FILTER'
+    elif 'MAG_TYPE' in cat.columns:
+        mag_type = 'MAG_TYPE'
+    else:
+        raise ValueError('Catalog must have a column named MAG_TYPE or MAG_FILTER')
+
     for row in cat:
         temp_fname = os.path.join(TEMP_PATH, row['TEMPLATE'])
         if 'SN' in temp_fname:
             continue
-        mag = row['MAGNITUDE']
+        mag = row[mag_name]
         redshift = row['REDSHIFT']
-        band = 'r' if 'r' in row['MAG_FILTER'] else 'z'
+
+        band = get_filter_name(row[mag_type])
         reddening = 0.
 
         temp_wl, temp_flux, redshift = load_template(
@@ -382,22 +424,22 @@ def main():
                                            redshift,
                                            mag, band,
                                            Ebv=reddening,
-                                           lya_forest=False,
+                                           lya_forest=args.lya,
                                            )
 
         # Create Mock Observation
         wl, flux, err, qual = apply_noise(temp_wl, temp_flux, sky_model, throughput, transmission,
                                           t_exp=args.texp,
-                                          cr=args.cr,
+                                          cr=args.no_cr,
                                           ra=row['RA'],
                                           dec=row['DEC'],
                                           cname=row['CNAME'],
                                           uid=row['TRG_UID'],
                                           redshift=redshift,
                                           magnitude=mag,
-                                          mag_filter=row['MAG_FILTER'],
+                                          mag_filter=row[mag_type],
                                           tempname=row['TEMPLATE'],
-                                          output_dir=OUTPUT_DIR,
+                                          output_dir=args.output,
                                           )
 
 
